@@ -1,58 +1,27 @@
 terraform {
   required_providers {
-    github = {
-      source  = "integrations/github"
-      version = "~> 6.0"
-    }
     google = {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
   }
 }
-
-provider "github" {
-  token = var.token # or `GITHUB_TOKEN`
-}
-
-resource "github_repository" "example" {
-  name        = "example"
-  description = "My awesome codebase"
-  auto_init   = true
-}
-
-# resource "github_branch" "development" {
-#   repository = github_repository.example.name
-#   branch     = "development"
-# }
-
-# resource "github_branch_default" "default"{
-#   repository = github_repository.example.name
-#   branch     = github_branch.development.branch
-# }
-
-variable "token" {
-  description = "GitHub token with repo permissions"
-  type        = string
-  sensitive   = true
-  
-}
-
 #GCP-config
 provider "google" {
-  project     = "my-project-id"
-  region      = "us-central1"
-    zone = "us-central1-a" # Choose your zone
-  /*
-  credentials = file("<path-to-your-service-account-key>.json") # Path to your service account key file
-  */
+  project     = var.project_id
+  region      = var.region
+  zone        = var.zone 
+  
+  credentials = file(var.credentials) # Path to your service account key file
+  
 }
 
 #Create-GCP-Network
-data "google_compute_network" "my-web-server-network" {
-  name = "my-web-server-network" # Replace with your network name
-  
+resource "google_compute_network" "custom-test" {
+  name                    = "test-network"
+  auto_create_subnetworks = false
 }
+
 #Create-subnet
 resource "google_compute_subnetwork" "network-with-private-secondary-ip-ranges" {
   name          = "test-subnetwork"
@@ -65,15 +34,10 @@ resource "google_compute_subnetwork" "network-with-private-secondary-ip-ranges" 
   }
 }
 
-resource "google_compute_network" "custom-test" {
-  name                    = "test-network"
-  auto_create_subnetworks = false
-}
-
 #Create-firewall-rule
-resource "google_compute_firewall" "default" {
+resource "google_compute_firewall" "custom-test" {
   name    = "test-firewall"
-  network = google_compute_network.default.name
+  network = google_compute_network.custom-test.name
 
   allow {
     protocol = "icmp"
@@ -87,7 +51,33 @@ resource "google_compute_firewall" "default" {
   source_tags = ["web"]
 }
 
-resource "google_compute_network" "default" {
-  name = "test-network"
+resource "google_compute_instance" "my-vm" {
+  name         = "my-vm-instance"
+  machine_type = "e2-micro" # Choose your machine type
+  zone         = "us-central1-a" # Choose your zone
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11" # Replace with your desired image
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.network-with-private-secondary-ip-ranges.name
+    access_config {
+      nat_ip = google_compute_address.my-vm.address # Assign a static IP address
+    }
+  }
+
+  metadata = {
+    ssh-keys = "your-username:${file("~/.ssh/id_rsa.pub")}" # Replace with your SSH key path
+  }
+  tags = ["web"] # Tags for the instance, can be used in firewall rules
 }
 
+resource "google_compute_address" "my-vm" {
+  name         = "my-vm-ip"
+  region       = "us-central1" # Choose your region
+  address_type = "EXTERNAL" # Use EXTERNAL for public IP, INTERNAL for private IP
+  
+}
